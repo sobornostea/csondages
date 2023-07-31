@@ -1,0 +1,4 @@
+pyTelegramBotAPI>=4.1.1
+pyYAML>=3.12
+black
+ruamel.yaml

@@ -1,0 +1,11 @@
+[Unit]
+Description=CS sondage bot service
+
+[Service]
+User=sobornost
+WorkingDirectory=/home/p2023/sobornost/csondages
+ExecStart=/home/p2023/sobornost/csondages/csondages
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
