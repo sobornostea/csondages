@@ -10,6 +10,7 @@ import re
 import traceback
 import sys
 
+
 class MyYAML(YAML):
     def dump(self, data, stream=None, **kw):
         inefficient = False
@@ -20,19 +21,22 @@ class MyYAML(YAML):
         if inefficient:
             return stream.getvalue()
 
+
 def escape(htmlstring):
     # This is done first to prevent escaping other escapes.
-    htmlstring = htmlstring.replace('&', '&amp;')
-    htmlstring = htmlstring.replace('<', '&lt;')
-    htmlstring = htmlstring.replace('>', '&gt;')
+    htmlstring = htmlstring.replace("&", "&amp;")
+    htmlstring = htmlstring.replace("<", "&lt;")
+    htmlstring = htmlstring.replace(">", "&gt;")
     return htmlstring
 
+
 def jade(ev):
-#    if ev.from_user.username in ["pyxyne","sobornostea"]:
-#        bot.send_message(ev.chat.id, str(sys.exc_info()))
+    #    if ev.from_user.username in ["pyxyne","sobornostea"]:
+    #        bot.send_message(ev.chat.id, str(sys.exc_info()))
     pass
 
-yaml = MyYAML() 
+
+yaml = MyYAML()
 
 # module constants
 MEDIA_FILTER_TYPES = ("photo", "animation", "document", "video", "sticker")
@@ -96,7 +100,7 @@ def init(config):
 
     bot = telebot.TeleBot(config["bot_token"], threaded=False)
 
-    types = ["poll","text"]
+    types = ["poll", "text"]
     set_handler(relay, content_types=types)
 
 
@@ -107,10 +111,11 @@ def set_handler(func, *args, **kwargs):
         except Exception as e:
             logging.exception("Exception raised in event handler")
 
-    bot.poll_handler(func=lambda ev: ev.content_type == "poll", *args, **kwargs)(wrapper)
+    bot.poll_handler(func=lambda ev: ev.content_type == "poll", *args, **kwargs)(
+        wrapper
+    )
     bot.message_handler(*args, **kwargs)(wrapper)
     bot.inline_handler(lambda m: True, *args, **kwargs)(wrapper)
-
 
 
 def run():
@@ -122,6 +127,7 @@ def run():
             logging.warning("%s while polling Telegram, retrying.", type(e).__name__)
             time.sleep(1)
 
+
 def relay(ev):
     print(ev)
     if ev.content_type == "poll":
@@ -131,46 +137,80 @@ def relay(ev):
     else:
         logging.info("Unknown command")
 
-def serialize(ev):
+
+def poll_to_dict(poll):
     deserialized_options = []
-    for options in ev.poll.options:
+    for options in poll.options:
         deserialized_options.append(options.text)
     deserialized_poll = {
-            "question": ev.poll.question,
-            "options": deserialized_options,
-            "is_anonymous": ev.poll.is_anonymous,
-            "type": ev.poll.type,
-            "allows_multiple_answers": ev.poll.allows_multiple_answers,
-            "correct_option_id": ev.poll.correct_option_id,
-            "explanation": ev.poll.explanation,
-            "open_period": ev.poll.open_period,
-            "close_date": ev.poll.close_date,
-            }
-    poll_dict = {k: v for k, v in deserialized_poll.items() if v is not None}
+        "question": poll.question,
+        "options": deserialized_options,
+        "is_anonymous": poll.is_anonymous,
+        "type": poll.type,
+        "allows_multiple_answers": poll.allows_multiple_answers,
+        "correct_option_id": poll.correct_option_id,
+        "explanation": poll.explanation,
+        "open_period": poll.open_period,
+        "close_date": poll.close_date,
+    }
+    return {k: v for k, v in deserialized_poll.items() if v is not None}
+
+
+def serialize(ev):
+    poll_dict = poll_to_dict(ev.poll)
     poll_text = ""
     poll_text = MyYAML().dump(poll_dict)
-    formatted_poll_text = "<pre><code class=\"language-yaml\">" + escape(poll_text) + "</code></pre>"
+    formatted_poll_text = (
+        '<pre><code class="language-yaml">' + escape(poll_text) + "</code></pre>"
+    )
     logging.info(str(ev.from_user.username) + "\n " + poll_text)
     return bot.send_message(ev.chat.id, formatted_poll_text, parse_mode="HTML")
+
 
 def deserialize(ev):
     logging.info(str(ev.from_user.username) + "\n " + ev.text)
     poll_dict = {}
+    # Check only the first entity
+    if "entities" in ev.json and ev.json["entities"][0]["type"] == "bot_command":
+        if "/help" in ev.text:
+            return bot.send_message(
+                ev.chat.id,
+                "Si tu veux m'utiliser, envoie moi le sondage que tu veux modifier. Je te renverrais un texte, dont tu modifieras les options, et que tu me renverras. Je t'enverrais un sondage que tu pourras forward !",
+            )
+        if "/redo" in ev.text:
+            if ev.reply_to_message is not None:
+                if ev.reply_to_message.content_type == "poll":
+                    poll_dict = poll_to_dict(ev.reply_to_message.poll)
+                    try:
+                        return bot.send_poll(chat_id=ev.from_user.id, **poll_dict)
+                    except Exception as e:
+                        logging.error("Poll error")
+                        return bot.send_message(
+                            ev.chat.id, "Je ne suis pas arrivé à copier ce sondage"
+                        )
+            return bot.send_message(
+                ev.chat.id,
+                "Il faut répondre à un sondage pour utiliser cette commande !",
+            )
+
     try:
         poll_dict = YAML(typ="safe").load(ev.text)
     except Exception:
         logging.error("Parser error")
         jade(ev)
-        return bot.send_message(ev.chat.id, "Je n'ai pas compris le format. Si tu as mis des \":\", essaye de mettre des \' autour du champ (par exemple \n question: 'Je veux:' \nà la place de \n question: Je veux:")
+        return bot.send_message(
+            ev.chat.id,
+            "Je n'ai pas compris le format. Si tu as mis des \":\", essaye de mettre des ' autour du champ (par exemple \n question: 'Je veux:' \nà la place de \n question: Je veux:",
+        )
 
     if "correct_option_id" in poll_dict:
         poll_dict["type"] = "quiz"
     try:
-        return bot.send_poll(
-            chat_id=ev.from_user.id,
-            **poll_dict
-        )
+        return bot.send_poll(chat_id=ev.from_user.id, **poll_dict)
     except Exception as e:
         logging.error("Poll error")
         jade(ev)
-        return bot.send_message(ev.chat.id, "Si tu veux m'utiliser, envoie moi le sondage que tu veux modifier. Je te renverrais un texte, dont tu modifieras les options, et que tu me renverras. Je t'enverrais un sondage que tu pourras forward !")
+        return bot.send_message(
+            ev.chat.id,
+            "Si tu veux m'utiliser, envoie moi le sondage que tu veux modifier. Je te renverrais un texte, dont tu modifieras les options, et que tu me renverras. Je t'enverrais un sondage que tu pourras forward !",
+        )
